@@ -1,111 +1,96 @@
-# Hiver SDE Intern Take-Home — Support Memory + Risk Gate
+# Hiver SDE Intern Take-Home — AppleSupport Memory + Risk Gate
 
-## Thesis
+## What this demonstrates
 
-This project is intentionally not a generic RAG chatbot. It treats customer support automation as a **trust decision**:
+This is a compact support-automation prototype for **AppleSupport** using the [Customer Support on Twitter (TWCS) dataset](https://www.kaggle.com/datasets/thoughtvector/customer-support-on-twitter). It makes a trust decision rather than acting as a generic chatbot:
 
-`Customer message → intent → historical support memory → evidence-backed draft → risk gate → AUTO-HANDLE / ESCALATE`
+`customer message → intent → historical support memory → draft → risk gate → AUTO-HANDLE / ESCALATE`
 
-The agent is designed to learn both **what the brand tends to do** and **when the brand historically handles cases privately**.
+The repository ships a 990-case AppleSupport-derived sample, not the roughly 500 MB TWCS raw CSV. The raw file is intentionally ignored; place it at `data/raw/twcs.csv` only to reproduce preprocessing.
 
-## Dataset
-
-Primary dataset: ThoughtVector's Customer Support on Twitter (TWCS). Source: https://www.kaggle.com/datasets/thoughtvector/customer-support-on-twitter The raw file is **not** committed. Place it at `data/raw/twcs.csv` when reproducing the full preprocessing. A 990-case derived sample is committed at `data/sample_data.csv` for quick demonstrations.
-
-## Reproduce
-
-### Full preprocessing (one time)
+## Quick reproduction (no API key; under 15 minutes)
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-python src/build_case_store.py
+python3 -m pip install -r requirements.txt
+python3 run.py --demo
+python3 run.py --evaluate
 ```
 
-This creates `data/processed/apple_cases.csv` and `data/processed/sample_data.csv`.
-
-### Demo — no API key required
+The evaluation regenerates `results/metrics.json`, `results/intent_confusion_matrix.png`, and the ignored local `results/agent_outputs.jsonl`. It evaluates the committed 990-case retrieval/training sample against the 200-row golden set. A full raw-data rebuild is optional:
 
 ```bash
-python run.py --demo
-python run.py --demo --message "My iPhone battery is draining really fast after the update and I already restarted it twice."
+python3 src/build_case_store.py
 ```
 
-### Evaluation — deterministic path
+## Verified deterministic results
 
-```bash
-python run.py --evaluate
-```
+The final deterministic run reports the following values from `results/metrics.json`:
 
-This runs the trivial baseline, TF-IDF + Logistic Regression baseline, rule-based intent benchmark, and the support-memory + risk-gate pipeline against the 200-example evaluation set.
+| System | Intent accuracy | Intent macro-F1 |
+|---|---:|---:|
+| Always-`account_access` trivial baseline | 0.100 | 0.018 |
+| TF-IDF + logistic regression simple baseline | 0.600 | 0.570 |
+| Rule intent benchmark | 0.910 | 0.833 |
+| Support-memory + risk-gate agent | 0.910 | 0.833 |
 
-### LLM path
+Routing for the deterministic agent: accuracy **0.940**, AUTO-HANDLE precision **0.969**, AUTO-HANDLE recall **0.912**, and unsafe-auto rate **0.031** (3 false AUTO-HANDLE decisions among 98 gold escalations).
 
-Set:
+These are deterministic-path results only. The final draft is a named `deterministic_template`; it is not presented as LLM-generated or as a retrieved historical reply. Retrieval still informs the risk gate through evidence strength and private-handoff precedent.
+
+## Data, taxonomy, and leakage control
+
+- **Taxonomy:** `account_access`, `billing_purchase`, `purchase_refund`, `subscription`, `connectivity`, `messages_calls`, `apps_appstore`, `battery_charging`, `software_update`, and `device_hardware`.
+- **Golden set:** 200 candidate-reviewed examples, 20 per intent. The review policy and provenance are in `data/golden/`.
+- **Integrity check:** this checkout has 0 duplicate golden IDs, 0 duplicate normalized texts, and 0 customer-ID or normalized-text overlaps between the golden set and committed retrieval sample.
+- **Corrections:** `data/golden/annotation_corrections.csv` is the row-level correction mechanism. The evaluator applies it to the immutable base set rather than treating it as a replacement dataset.
+
+Initial stratification was rule-assisted, so the benchmark is not an independent random annotation study. Candidate review is self-review, not third-party annotation. The simple baseline is trained on weak labels from the deterministic classifier; it is a transparent engineering baseline, not an independent estimate of real-world model quality.
+
+## Optional LLM drafting path
 
 ```bash
 export OPENAI_API_KEY="..."
 export OPENAI_MODEL="..."
+# Optional for an OpenAI-compatible provider such as OpenRouter:
+export OPENAI_BASE_URL="https://openrouter.ai/api/v1"
+python3 run.py --demo --llm --message "My iPhone battery is draining after the update."
 ```
 
-Then:
+For the supplied free-router configuration, set `OPENAI_MODEL=openrouter/free`; the judge records its model and base URL alongside every genuine score. On a successful LLM call, `drafting_mode` is `llm_grounded` and the prompt includes the top three retrieved AppleSupport customer/support pairs. The system prompt forbids invented policy and public requests for secrets. Provider failure produces an explicit `deterministic_fallback`; it must not be reported as an LLM result. The risk gate always runs independently after drafting.
+
+## Optional LLM-as-judge and human comparison
+
+First create deterministic outputs, then run a 50-example judge pass:
 
 ```bash
-python run.py --evaluate --llm
+python3 run.py --evaluate
+python3 evaluation/llm_judge.py --limit 50
+python3 evaluation/compare_judge.py
 ```
 
-The LLM path uses retrieved historical cases as evidence. The key is never committed.
+The judge uses correctness, groundedness, issue coverage, safety, and tone (0–2 each). It respects `OPENAI_BASE_URL`, uses a bounded per-call timeout, retries transient/API-format failures, and saves genuine partial scores separately if it cannot finish. It writes `results/llm_judge_scores.csv` and a 50-row agreement file only after all 50 calls complete.
 
-### LLM-as-judge (optional)
+`evaluation/human_judge_sheet.csv` contains 50 completed candidate-review rows. In this final validation environment `OPENAI_API_KEY` was unavailable, so no external LLM judge scores or judge-vs-human agreement statistic are claimed or committed.
 
-The judge harness is implemented but requires an external LLM API key. Generate agent outputs first, then:
+## Limitations, failure analysis, and next week
 
-```bash
-python evaluation/llm_judge.py
-python evaluation/compare_judge.py
-```
+The strong deterministic headline is easy to overread: labels were rule-assisted and actions were candidate-reviewed under a policy similar to the risk gate. It is a bounded single-message benchmark, not proof of safe multi-turn deployment. Accuracy also hides the asymmetric cost of a false AUTO-HANDLE decision; use unsafe-auto rate and AUTO precision alongside routing accuracy.
 
-The judge scores 50 examples on correctness, groundedness, issue coverage, safety, and tone. `evaluation/human_judge_sheet.csv` contains candidate-reviewed scores for the matching examples. The checked-in repo intentionally does **not** claim a judge-vs-human agreement result because the external judge was not run.
+Observed deterministic failures include Apple ID/App Store ambiguity (`G004`), payment-declined tweets dominated by update keywords (`G024`), unsupported “unsubscribe” phrasing (`G062`), recurring update/hardware failures being auto-handled (`G189`), and conservative escalation of persistent device symptoms (`G192`). See [the report](report/report.md) for the examples and next-week plan.
 
-## Evaluation protocol
-
-- **Golden set:** 200 stratified examples across 10 intents.
-- **Leakage control:** golden tweet IDs are excluded from training/retrieval cases.
-- **Intent metrics:** accuracy + macro-F1 + per-class results.
-- **Routing metrics:** accuracy, AUTO precision/recall, unsafe-auto rate, escalation recall.
-- **Reply metrics:** candidate review on a 50-example subset; optional LLM judge comparison when an API key is available.
-
-## Important evaluation note
-
-The 200-example golden set is a **candidate-reviewed reference set** based on the documented annotation policy. The 50-example reply-quality subset is also candidate-reviewed with row-level notes.
-
-The repository includes a real LLM-as-judge harness (`evaluation/llm_judge.py`) and a comparison script, but no external LLM call was executed in this environment because no API key was available. `results/judge_human_agreement.csv` therefore records `NOT_RUN` rather than a fabricated agreement number.
-
-The deterministic path (`python run.py --evaluate`) is the reproducible no-key benchmark. The optional LLM path is the intended production-style drafting path because it receives retrieved historical support cases as evidence.
-
-## Repository layout
+## Repository map
 
 ```text
-src/
-  build_case_store.py     # link-aware extraction from TWCS
-  brand_analysis.py       # brand viability analysis
-  intent.py               # compact intent taxonomy + deterministic fallback
-  retrieval.py            # support memory
-  risk_gate.py            # conservative automation policy
-  llm_agent.py            # optional LLM generation
-  pipeline.py             # end-to-end agent
-
-evaluation/
-  evaluate_all.py         # baselines + end-to-end metrics
-  llm_judge.py            # judge harness
-
-data/
-  sample_data.csv
-  golden/golden_set.csv
-  golden/ANNOTATION_POLICY.md
-
-report/report.md
-results/metrics.json
-results/agent_outputs.jsonl
+data/sample_data.csv                    # 990-case committed AppleSupport sample
+data/golden/                            # 200-row policy/provenance-backed golden set
+src/                                    # retrieval, intent, risk gate, optional LLM path
+evaluation/evaluate_all.py              # baselines and end-to-end deterministic metrics
+evaluation/llm_judge.py                 # resumable 50-example external judge harness
+evaluation/compare_judge.py             # 50-row judge-vs-candidate comparison
+report/report.md                        # concise evaluation report
+decision_log.md                         # 15 implementation decisions
 ```
+
+## Attribution
+
+The underlying source is ThoughtVector’s [Customer Support on Twitter dataset](https://www.kaggle.com/datasets/thoughtvector/customer-support-on-twitter). No raw TWCS file or external API secret is committed.

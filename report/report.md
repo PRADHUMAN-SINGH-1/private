@@ -1,79 +1,54 @@
-# AppleSupport Support Agent — Evaluation Report
+# AppleSupport Support Agent — Concise Evaluation Report
 
-## 1. Problem framing
+## 1. Scope and data
 
-This project treats support automation as a **trust decision**, not simply a response-generation task. Good means the system identifies the customer's primary operational issue, finds evidence from the brand's historical support behavior, drafts a useful public response without inventing policy, and declines automation when risk or evidence quality is unfavorable.
+This project tests a narrow support-automation decision for **AppleSupport**: classify a public customer message, retrieve observed AppleSupport behavior, prepare a safe draft, and decide `AUTO-HANDLE` or `ESCALATE`. The source is ThoughtVector’s [Customer Support on Twitter (TWCS)](https://www.kaggle.com/datasets/thoughtvector/customer-support-on-twitter). The raw source CSV is excluded; the repository contains a 990-case, response-linked AppleSupport sample for reproducibility.
 
-The selected brand is **AppleSupport**. Brand screening on TWCS showed 106,860 AppleSupport outbound tweets and 106,622 usable response-linked customer/support cases after filtering. AppleSupport was chosen because it offers enough data while keeping the experiment focused on a coherent set of support problems.
+The taxonomy has 10 operational intents: account access, billing/payment, purchase/refund, subscription, connectivity, messages/calls, apps/App Store, battery/charging, software update, and device hardware. The prototype intentionally does not build customer accounts, payment handling, private-message execution, or a frontend.
 
-**Not built:** a customer-account system, payment processing, private-message handling, a frontend, or web search. Those add surface area but do not improve the proof required by the assignment.
+## 2. System and safety boundary
 
-## 2. System
+`customer message → intent → TF-IDF support memory → draft → risk gate → decision`
 
-`Customer → intent → Support Memory → evidence/risk signals → draft → Risk Gate`
+Support Memory retrieves AppleSupport customer-message/support-reply pairs. The deterministic path uses named generic templates; it does **not** claim that its template text is historically grounded. It uses retrieval only for risk signals: semantic evidence strength and whether similar historical replies requested private follow-up.
 
-Support Memory stores customer-message/support-reply pairs. Retrieval is TF-IDF cosine similarity in the reproducible baseline. The LLM path supplies the top historical cases to the generator and explicitly forbids unsupported policy, invented timelines, and requests for secrets in a public tweet.
+The optional LLM path passes the three retrieved pairs to an OpenAI-compatible model and labels a successful response `llm_grounded`. Its prompt forbids invented policy, timelines, or public secret requests. A provider failure is surfaced as `deterministic_fallback`. The separate risk gate escalates account/security, financial, sensitive-information, persistent-failure, weak-evidence, and private-follow-up cases regardless of draft source.
 
-The Risk Gate is deliberately separate from drafting. It considers account/security signals, financial signals, intent confidence, retrieval strength, repeated failure, and evidence that similar historical cases were handled privately. Negative sentiment alone is **not** an escalation rule.
+## 3. Reference set and protocol
 
-## 3. Golden evaluation set
+The committed golden set has **200** candidate-reviewed examples, exactly 20 for each intent. The set has zero duplicate IDs, zero duplicate normalized texts, and no ID/text overlap with the committed 990-case retrieval/training sample. Initial stratification was rule-assisted; the candidate reviewed labels under the documented policy, with corrections represented separately in `annotation_corrections.csv`. This is self-review rather than independent third-party annotation.
 
-The committed set contains 200 stratified examples, 20 per intent across 10 intents: account access, billing/payment, purchase/refund, subscription, connectivity, messages/calls, apps/App Store, battery/charging, software update, and device hardware. Golden IDs are excluded from the retrieval pool.
+Evaluation excludes golden customer IDs from both the simple-baseline training rows and the Support Memory. The trivial baseline always emits `account_access`. The simple baseline is TF-IDF + logistic regression trained on weak deterministic labels. It is useful as a transparent baseline, but its label source is related to the rule benchmark and therefore is not an independent validation control.
 
-The candidate reviewed the 200 examples using the documented annotation policy; this is candidate-level annotation, not independent third-party labeling. Corrections are tracked in `data/golden/annotation_corrections.csv`.
+## 4. Verified deterministic results
 
-## 4. Provisional results
+The final `python3 run.py --evaluate` run produced:
 
-The following results are from the deterministic pipeline on the 990-case committed sample and the current 200-row candidate reference set:
-
-| System | Intent Accuracy | Intent Macro-F1 |
+| System | Intent accuracy | Intent macro-F1 |
 |---|---:|---:|
-| Majority-intent trivial baseline | 0.100 | 0.018 |
-| TF-IDF + Logistic Regression | 0.600 | 0.570 |
+| Trivial baseline | 0.100 | 0.018 |
+| TF-IDF + logistic regression | 0.600 | 0.570 |
 | Rule intent benchmark | 0.910 | 0.833 |
-| Agent intent | 0.910 | 0.833 |
+| Support-memory + risk-gate agent | 0.910 | 0.833 |
 
-Routing:
+Routing metrics for the deterministic agent: accuracy **0.940**; AUTO-HANDLE precision **0.969**; AUTO-HANDLE recall **0.912**; unsafe-auto rate **0.031** (3 of 98 gold escalations were AUTO-HANDLEd). The always-escalate routing baseline has 0.490 accuracy and 1.000 escalation recall.
 
-| Metric | Result |
-|---|---:|
-| Accuracy | 0.940 |
-| AUTO precision | 0.969 |
-| AUTO recall | 0.912 |
-| Unsafe-auto rate | 0.031 |
+The repository contains a runnable 50-example LLM-judge harness and a completed 50-row candidate-review sheet. During final validation, no `OPENAI_API_KEY` was available in the execution environment. Therefore no external judge score file or judge-vs-human agreement is reported. No LLM quality claim is inferred from deterministic templates.
 
-These results are based on the candidate-reviewed 200-example reference set and are the current headline metrics for the deterministic evaluation path.
+## 5. Failure analysis and misleading headline
 
-The optional LLM generation path is implemented but was not executed in this environment because no API credential was provided. The repository deliberately does not manufacture LLM results.
+Five observed examples from the final deterministic outputs:
 
-## 5. Baselines
+1. **Account/App Store overlap — `G004`.** A Touch Bar/App Store message includes an Apple ID password; the classifier predicted `apps_appstore` instead of the account-access label. Routing still escalated.
+2. **Payment hidden by update language — `G024`.** “Payment declined” alongside app-update language was predicted `software_update` rather than billing. The financial gate still escalated.
+3. **Unsupported paraphrase — `G062`.** “Unsubscribe to an auto renewing app” fell to `other_services`, producing an unnecessary escalation for a gold AUTO-HANDLE case.
+4. **Long-running failure under-modeled — `G189`.** A recurring iOS 11 screen-lockup was labeled device hardware but predicted software update and AUTO-HANDLEd, one of the three unsafe autos.
+5. **Conservative persistence rule — `G192`.** A screen-freeze message after iOS 11 was escalated although the reviewed action is AUTO-HANDLE, showing the policy’s false-escalation cost.
 
-**Trivial baseline:** always predict one intent. With a balanced gold set, it reaches 10% accuracy and demonstrates why raw accuracy is a weak headline.
+The 0.910 intent and 0.940 routing headlines are not deployment claims. Rule-assisted sampling and weak-label training can make a related rule classifier look better than it would on independently annotated traffic. Routing accuracy also obscures the asymmetric cost of a false AUTO-HANDLE; unsafe-auto rate and AUTO precision are more meaningful operating metrics. This is a single-message benchmark, so it does not establish safe multi-turn support behavior.
 
-**Simple baseline:** TF-IDF + Logistic Regression trained on silver-labelled historical examples. It is transparent, fast, and does not use generation or historical response style.
+## 6. Next week and attribution
 
-The final live comparison should add the LLM path and answer a narrower question: does historical support evidence improve groundedness and routing safety over an LLM without Support Memory?
+Next, I would add a temporal holdout and independent annotations, calibrate abstention, test adversarial multi-intent messages, and separate historical *action* (public answer, DM, or handoff) from reply text. I would compare a hybrid sparse+dense retriever against TF-IDF and run the complete external judge plus the 50-row agreement analysis with a recorded model/provider configuration.
 
-## 6. Top failure modes
-
-**1. Primary-intent ambiguity.** A tweet may mention an update, battery, Wi-Fi, and crashing simultaneously. A single-label benchmark forces one primary issue. The system needs an explicit primary-issue policy.
-
-**2. Account terms inside another task.** “Apple ID” can appear while the customer's actual problem is App Store or billing. Generic account keywords therefore create false account classifications.
-
-**3. Charging vs billing language.** “Charge” has two meanings. The classifier must use local context rather than the token alone.
-
-**4. Historical handoff does not equal semantic relevance.** A retrieved case can look similar but indicate that Apple historically moved that case into DM. Retrieval relevance should therefore increase caution rather than authorize automation.
-
-**5. Multi-turn state is missing.** TWCS contains ongoing conversations. A single incoming message does not always contain enough state to decide safely, even if a similar historical case exists.
-
-## 7. What is misleading about my headline number?
-
-A routing accuracy such as **94.0%** sounds strong, but it hides asymmetric error costs. A false AUTO-HANDLE can be much worse than an unnecessary escalation. For that reason, the primary safety metric is **unsafe-auto rate** and the secondary operating metric is AUTO precision.
-
-LLM-judge reply scores are also not truth. A judge can share linguistic preferences with the generator. I therefore included a 50-example candidate-reviewed reply-quality subset and a runnable judge-comparison harness. Because no external LLM API credential was available during development, **no judge-vs-human agreement statistic is claimed**; the checked-in agreement file explicitly records `NOT_RUN`.
-
-Finally, the benchmark is primarily single-message evaluation. Strong results here do not prove safe long-running customer conversations.
-
-## 8. One more week
-
-I would add a hybrid BM25+dense retriever, calibrated abstention for intent classification, adversarial golden examples, and a temporal holdout. I would also model **historical support action** separately from reply generation so the system learns not only “what did support say?” but “did support answer publicly, ask for DM, or hand off?”
+Data attribution: ThoughtVector, [Customer Support on Twitter](https://www.kaggle.com/datasets/thoughtvector/customer-support-on-twitter). No raw TWCS data or API secrets are included in this repository.

@@ -20,12 +20,15 @@ class Agent:
                 intent=out.get('intent', intent)
                 conf=float(out.get('intent_confidence', conf))
                 draft=out.get('reply','')
+                drafting_mode='llm_grounded'
             except (LLMUnavailable, ValueError, KeyError):
                 draft=self._template(intent)
+                drafting_mode='deterministic_fallback'
         else:
             draft=self._template(intent)
+            drafting_mode='deterministic_template'
         decision, risk, reason=route(message, conf, retrieved, draft)
-        return {'intent':intent,'intent_confidence':round(conf,2),'reply':draft,'decision':decision,'risk_score':risk,'evidence_strength':round(evidence_strength,3),'reason':reason,'evidence':[r.__dict__ for r in retrieved]}
+        return {'intent':intent,'intent_confidence':round(conf,2),'reply':draft,'drafting_mode':drafting_mode,'decision':decision,'risk_score':risk,'evidence_strength':round(evidence_strength,3),'reason':reason,'evidence':[r.__dict__ for r in retrieved]}
 
     @staticmethod
     def _template(intent):

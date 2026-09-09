@@ -20,6 +20,6 @@ The gold set contains 200 examples, stratified 20 per intent across 10 operation
 Negative sentiment alone is **not** an escalation trigger. Operational risk is the boundary.
 
 ## Sampling
-Examples are selected from customer→AppleSupport response-linked cases, stratified by intent, deduplicated by tweet ID/text, and kept outside the committed retrieval sample.
+Examples are selected from customer→AppleSupport response-linked cases, initially stratified with documented intent rules, then candidate-reviewed under this policy. They are deduplicated by tweet ID/text and kept outside the committed retrieval sample.
 
-The candidate should personally verify the 200 rows before submission; any changes belong in `annotation_corrections.csv`.
+Any post-review changes belong in `annotation_corrections.csv`; the evaluator applies those rows as corrections to the base golden set.

@@ -16,6 +16,29 @@ RES=ROOT/'results'; RES.mkdir(exist_ok=True)
 
 def weak_label(x): return classify(x)[0]
 
+def load_gold():
+    """Apply any documented row-level corrections to the immutable gold set."""
+    gold=pd.read_csv(GOLD)
+    corrections_path=ROOT/'data/golden/annotation_corrections.csv'
+    corrections=pd.read_csv(corrections_path)
+    if corrections.empty:
+        return gold
+    if corrections.golden_id.duplicated().any():
+        raise ValueError('annotation_corrections.csv contains duplicate golden_id values.')
+    gold=gold.set_index('golden_id')
+    for correction in corrections.itertuples(index=False):
+        if correction.golden_id not in gold.index:
+            raise ValueError(f'Unknown correction ID: {correction.golden_id}')
+        for source, target in [
+            ('corrected_intent', 'true_intent'),
+            ('corrected_action', 'true_action'),
+            ('corrected_must_contain', 'must_contain'),
+        ]:
+            value=getattr(correction, source)
+            if pd.notna(value) and str(value).strip():
+                gold.loc[correction.golden_id, target]=value
+    return gold.reset_index()
+
 def classical(train, gold):
     train=train.sample(min(5000,len(train)),random_state=42)
     y=train.customer_text.map(weak_label)
@@ -27,8 +50,7 @@ def classical(train, gold):
 
 def main(use_llm=False):
     cases=pd.read_csv(CASES)
-    gold_path=ROOT/'data/golden/annotation_corrections.csv'
-    gold=pd.read_csv(gold_path) if gold_path.exists() and gold_path.stat().st_size > 120 else pd.read_csv(GOLD)
+    gold=load_gold()
     gold_ids=set(gold.customer_tweet_id.astype(int))
     train=cases[~cases.customer_tweet_id.astype(int).isin(gold_ids)].copy()
     majority=gold.true_intent.value_counts().sort_index().index[0] if gold.true_intent.nunique()==len(gold.true_intent.value_counts()) else gold.true_intent.value_counts().idxmax()
@@ -37,7 +59,11 @@ def main(use_llm=False):
     heuristic=[classify(t)[0] for t in gold.tweet_text]
     memory_cases=train.sample(min(20000,len(train)),random_state=43)
     agent=Agent(memory_cases,use_llm=use_llm)
-    outputs=[agent.run(t) for t in gold.tweet_text]
+    outputs=[]
+    for row in gold.itertuples(index=False):
+        output=agent.run(row.tweet_text)
+        output['golden_id']=row.golden_id
+        outputs.append(output)
     agent_intent=[o['intent'] for o in outputs]
     metrics={
       'dataset':{'cases':int(len(cases)),'golden':int(len(gold))},
