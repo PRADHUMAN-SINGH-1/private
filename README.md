@@ -70,7 +70,7 @@ python3 evaluation/compare_judge.py
 
 The judge uses correctness, groundedness, issue coverage, safety, and tone (0–2 each). It respects `OPENAI_BASE_URL`, uses a bounded per-call timeout, retries transient/API-format failures, and saves genuine partial scores separately if it cannot finish. It writes `results/llm_judge_scores.csv` and a 50-row agreement file only after all 50 calls complete.
 
-`evaluation/human_judge_sheet.csv` contains 50 completed candidate-review rows. In this final validation environment `OPENAI_API_KEY` was unavailable, so no external LLM judge scores or judge-vs-human agreement statistic are claimed or committed.
+`evaluation/human_judge_sheet.csv` contains 50 completed candidate-review rows. Final validation completed 50 genuine external judge calls: 18 rows used `openrouter/free` and 32 used `gemini-3.6-flash` after free-provider limits. Per-row model provenance is recorded in `results/llm_judge_scores.csv`. The matching 50-row comparison in `results/judge_human_agreement.csv` reports exact agreement / Cohen's kappa of 0.26 / -0.045 (correctness), 0.26 / -0.008 (groundedness), 0.08 / -0.062 (issue coverage), 0.92 / -0.020 (safety), 0.54 / 0.000 (tone), and 0.16 / 0.031 (total). This is a genuine mixed-provider judge run, not a single-model agreement estimate.
 
 ## Limitations, failure analysis, and next week
 

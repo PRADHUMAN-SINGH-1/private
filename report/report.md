@@ -33,7 +33,9 @@ The final `python3 run.py --evaluate` run produced:
 
 Routing metrics for the deterministic agent: accuracy **0.940**; AUTO-HANDLE precision **0.969**; AUTO-HANDLE recall **0.912**; unsafe-auto rate **0.031** (3 of 98 gold escalations were AUTO-HANDLEd). The always-escalate routing baseline has 0.490 accuracy and 1.000 escalation recall.
 
-The repository contains a runnable 50-example LLM-judge harness and a completed 50-row candidate-review sheet. During final validation, no `OPENAI_API_KEY` was available in the execution environment. Therefore no external judge score file or judge-vs-human agreement is reported. No LLM quality claim is inferred from deterministic templates.
+The repository contains a runnable 50-example LLM-judge harness and a completed 50-row candidate-review sheet. Final validation completed all 50 external judge calls. The first 18 use `openrouter/free`; the remaining 32 use `gemini-3.6-flash` after free-provider limits. Per-row model provenance is recorded in `results/llm_judge_scores.csv`.
+
+The genuine 50-row judge-vs-candidate comparison reports exact agreement / Cohen's kappa: correctness 0.26 / -0.045, groundedness 0.26 / -0.008, issue coverage 0.08 / -0.062, safety 0.92 / -0.020, tone 0.54 / 0.000, and total 0.16 / 0.031. The high safety exact agreement is notable, but the low kappas and mixed providers mean this is not evidence of strong, single-model evaluator reliability. No LLM quality claim is inferred from deterministic templates.
 
 ## 5. Failure analysis and misleading headline
 
