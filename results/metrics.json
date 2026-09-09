@@ -1,0 +1,33 @@
+{
+  "dataset": {
+    "cases": 990,
+    "golden": 200
+  },
+  "trivial_label": "account_access",
+  "baseline_trivial": {
+    "accuracy": 0.1,
+    "macro_f1": 0.01818181818181818
+  },
+  "baseline_classical_tfidf_lr": {
+    "accuracy": 0.6,
+    "macro_f1": 0.5698177277927408
+  },
+  "rule_intent": {
+    "accuracy": 0.91,
+    "macro_f1": 0.8328321834303317
+  },
+  "agent_intent": {
+    "accuracy": 0.91,
+    "macro_f1": 0.8328321834303317
+  },
+  "baseline_trivial_routing": {
+    "accuracy": 0.49,
+    "escalation_recall": 1.0
+  },
+  "agent_routing": {
+    "accuracy": 0.94,
+    "auto_precision": 0.96875,
+    "auto_recall": 0.9117647058823529,
+    "unsafe_auto_rate": 0.030612244897959183
+  }
+}
